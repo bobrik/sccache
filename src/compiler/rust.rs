@@ -1084,7 +1084,7 @@ fn parse_arguments(arguments: &[OsString], cwd: &Path) -> CompilerArguments<Pars
     let mut gcno = false;
     let mut target_json = None;
 
-    for arg in ArgsIter::new(arguments.iter().cloned(), &ARGS[..]) {
+    for (idx, arg) in ArgsIter::new(arguments.iter().cloned(), &ARGS[..]).enumerate() {
         let arg = try_or_cannot_cache!(arg, "argument parse");
         match arg.get_data() {
             Some(TooHardFlag) | Some(TooHardPath(_)) => {
@@ -1176,9 +1176,21 @@ fn parse_arguments(arguments: &[OsString], cwd: &Path) -> CompilerArguments<Pars
             None => {
                 match arg {
                     Argument::Raw(ref val) => {
+                        if idx == 0 {
+                            if let Some(value) = val.to_str() {
+                                if value == "rustc" {
+                                    // If the first argument is rustc, it's likely called via clippy-driver,
+                                    // so it's not actually an input file, which means we should discount it.
+                                    continue;
+                                }
+                            }
+                        }
                         if input.is_some() {
                             // Can't cache compilations with multiple inputs.
-                            cannot_cache!("multiple input files");
+                            cannot_cache!(
+                                "multiple input files",
+                                format!("prev = {input:?}, next = {arg:?}")
+                            );
                         }
                         input = Some(val.clone());
                     }
@@ -1419,6 +1431,8 @@ where
             staticlib_hashes,
             target_json_hash
         )?;
+
+        debug!("[{}]: Hash key: source_files = {:?}, source_hashes = {:?}, extern_hashes = {:?}, staticlib_hashes = {:?}, target_json_hash = {:?}, env_deps = {:?}", self.parsed_args.crate_name, source_files, source_hashes, extern_hashes, staticlib_hashes, target_json_hash, env_deps);
 
         // If you change any of the inputs to the hash, you should change `CACHE_VERSION`.
         let mut m = Digest::new();
